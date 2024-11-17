@@ -3,72 +3,108 @@ package com.psp_actividad1.server;
 import java.io.*;
 import java.net.Socket;
 
+/**
+ * Clase creadda para gestionar a un cliente especifico, se implementa Runnable para poder
+ * ejecutarla en un hilo independiente
+ */
 public class ClientHandler implements Runnable {
+    /**
+     * el atributo Socket clienteSocket representa el punto de conexión con el cliente.
+     * BooksManager es la clase creada para gestionar las diferentes operaciones de la aplicación
+     */
     private final Socket clientSocket;
     private final BooksManager booksManager;
 
+    /**
+     * Inicializamos el socket de conexión con el cliente y el booksmanager
+     * @param clientSocket
+     * @param booksManager
+     */
     public ClientHandler(Socket clientSocket, BooksManager booksManager) {
         this.clientSocket = clientSocket;
         this.booksManager = booksManager;
     }
 
+    /**
+     * sobrescribimos el método run de la interfaz runnable
+     */
     @Override
     public void run() {
+        System.out.println("Conectando con cliente: " + clientSocket.getInetAddress());
+
+        /**
+         * Abrimos los flujos de entrada (InputStream + BufferedReader) y salida (OutputStream + PrintWriter)
+         * del socket del cliente para leer los datos enviados por el cliente y enviarle respuestas.
+         * Al estar en un bloque try evitamos que los flujos queden abiertos en caso de fallo
+         *
+         */
         try (
-            InputStream inputStream = clientSocket.getInputStream();
-            OutputStream outputStream = clientSocket.getOutputStream();
-            BufferedReader bufferedReader = new BufferedReader(new InputStreamReader(inputStream));
-            PrintWriter printWriter = new PrintWriter(outputStream, true);
+                InputStream input = clientSocket.getInputStream();
+                OutputStream output = clientSocket.getOutputStream();
+                BufferedReader reader = new BufferedReader(new InputStreamReader(input));
+                PrintWriter writer = new PrintWriter(output, true);
         ) {
+            /**
+             * dentro del bucle while leemos la respuesta del cliente y la envío al método requestFormatter()
+             * para interpretar el comando que el cliente ha enviado al servidor,
+             * con writer.printLn le enviamos la respuesta al cliente.
+             */
             String request;
-            while ((request = bufferedReader.readLine()) != null) {
-                String response = processRequest(request);
-                printWriter.println(response);
+            while ((request = reader.readLine()) != null) {
+                System.out.println("Se ha recibido una petición");
+                String res = requestFormatter(request);
+                writer.println(res);
             }
         } catch (IOException e) {
-            System.err.println("Error en la comunicación con el cliente: " + e.getMessage());
+            throw new RuntimeException(e);
         } finally {
             try {
                 clientSocket.close();
-                System.out.println("Conexión con el cliente cerrada.");
             } catch (IOException e) {
-                System.err.println("Error al cerrar el socket del cliente: " + e.getMessage());
+                throw new RuntimeException(e);
             }
         }
     }
 
-    private String processRequest(String request) {
-        String[] parts = request.split(":");
-        String command = parts[0]; // El comando enviado por el cliente
-        switch (command) {
-            case "GET_BOOK_BY_ISBN":
-                if (parts.length > 1) {
-                    String isbn = parts[1];
-                    Book book = booksManager.getBookByIsbn(isbn);
-                    return book != null ? book.toString() : "Libro no encontrado.";
-                }
-                return "Solicitud mal formada. Falta el ISBN.";
+    /**
+     * Con este método se interpreta la petición del cliente, recogemos el comando envíado y
+     * dentro del switch case ejecutamos el caso correspondiente al comando
+     * @param request
+     * @return
+     */
+    private String requestFormatter(String request) {
+        String[] commandParts = request.split(", ");
+        String command = commandParts[0].toUpperCase();
 
-            case "GET_BOOKS_BY_TITLE":
-                if (parts.length > 1) {
-                    String title = parts[1];
-                    return booksManager.getBooksByTitle(title).toString();
-                }
-                return "Solicitud mal formada. Falta la palabra clave.";
+        switch (command) {
+            case "GET_BY_ISBN":
+                String isbn = commandParts[1];
+                Book book = booksManager.getBookByIsbn(isbn);
+                return book != null ? book.toString() : "Error: no se ha encontrado el libro";
+
+            case "GET_BY_TITLE":
+                String title = commandParts[1];
+                return booksManager.getBooksByTitle(title).toString();
+
+            case "GET_BY_AUTHOR":
+                String author = commandParts[1];
+                return booksManager.getBooksByAuthor(author).toString();
 
             case "ADD_BOOK":
-                if (parts.length == 4) {
-                    String isbn = parts[1];
-                    String title = parts[2];
-                    String author = parts[3];
-                    double price = Double.parseDouble(parts[4]);
-                    booksManager.addNewBook(new Book(isbn, title, author, price));
-                    return "Libro añadido correctamente.";
+                if (commandParts.length < 5) return "Error: no se han encontrado suficientes parámtros para agregar un nuevo libro.";
+                try {
+                    String newIsbn = commandParts[1];
+                    String newTitle = commandParts[2];
+                    String newAuthor = commandParts[3];
+                    double newPrice = Double.parseDouble(commandParts[4]);
+                    booksManager.addNewBook(new Book(newIsbn, newTitle, newAuthor, newPrice));
+                    return "Se agregado el libro correctamente";
+                } catch (NumberFormatException e) {
+                    throw new RuntimeException(e);
                 }
-                return "Solicitud mal formada. Faltan datos.";
 
             default:
-                return "Comando no reconocido.";
+                return "Error: no se ha elegido una opción correcta";
         }
     }
 }
